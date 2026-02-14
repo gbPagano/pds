@@ -70,12 +70,16 @@ lto              = 'fat'
 opt-level        = 's'
 overflow-checks  = false
 
+[lib]
+bench = false
+test = false
 
 [[bin]]
 name = "audio"
 test = false
 bench = false
 
-[lib]
-bench = false
+[[bin]]
+name = "test"
 test = false
+bench = false
