@@ -1,8 +1,14 @@
-[target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = "picotool load -u -v -x -t elf"
-
-[build]
-target = "thumbv6m-none-eabi"
+[target.xtensa-esp32s3-none-elf]
+runner = "probe-rs run --chip=esp32s3 --preverify --always-print-stacktrace --no-location --catch-hardfault"
 
 [env]
-DEFMT_LOG = "debug"
+
+[build]
+rustflags = [
+  "-C", "link-arg=-nostartfiles",
+]
+
+target = "xtensa-esp32s3-none-elf"
+
+[unstable]
+build-std = ["alloc", "core"]
