@@ -38,7 +38,7 @@ pub async fn encoder_reader_task(pin_a: AnyPin<'static>, pin_b: AnyPin<'static>)
             };
             ENCODER_CHANNEL.send(direction).await;
 
-            log::info!("Encoder: {direction:?}");
+            log::debug!("Encoder: {direction:?}");
         }
 
         tra.wait_for_falling_edge().await;

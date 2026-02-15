@@ -5,7 +5,7 @@ use esp_hal::gpio::{AnyPin, Input, InputConfig, Pull};
 /// A thread-safe signal to notify tasks of button events.
 pub type ButtonSignal = Signal<CriticalSectionRawMutex, bool>;
 
-/// Monitors a GPIO pin for button presses with 50ms debouncing.
+/// Monitors a GPIO pin for button presses with 20ms debouncing.
 ///
 /// # Parameters
 /// - `pin_gpio`: GPIO pin to monitor
@@ -23,13 +23,11 @@ pub async fn button_task(
     loop {
         button.wait_for_falling_edge().await;
 
-        Timer::after(Duration::from_millis(50)).await; // Debounce
+        Timer::after(Duration::from_millis(20)).await; // Debounce
 
         if button.is_low() {
-            log::info!("{id} pressed!");
+            log::debug!("{id} pressed!");
             signal.signal(true);
         }
-
-        button.wait_for_rising_edge().await;
     }
 }
