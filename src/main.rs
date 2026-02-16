@@ -3,17 +3,15 @@
 
 use display_interface_i2c::I2CInterface;
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
-use esp_hal::i2c::master::{Config, I2c};
-use esp_hal::{clock::CpuClock, i2s::master as i2s, time::Rate, timer::timg::TimerGroup};
+use esp_hal::{
+    clock::CpuClock,
+    i2c::master::{Config, I2c},
+    i2s::master as i2s,
+    time::Rate,
+    timer::timg::TimerGroup,
+};
 use oled_async::builder::Builder;
-use rtt_target::rprintln;
-
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
-    rprintln!("PANIC!!");
-    loop {}
-}
+use panic_rtt_target as _; // this defines panic handler
 
 use pds::audio::{IS_PLAYING_SIGNAL, NEXT, PREVIOUS, audio_task, volume_handler_task};
 use pds::button::button_task;
@@ -24,23 +22,14 @@ use pds::encoder::encoder_reader_task;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_rtos::main]
-async fn main(spawner: Spawner) -> ! {
+async fn main(spawner: Spawner) {
     rtt_target::rtt_init_log!();
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
-
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
-
-    rprintln!("Embassy initialized!");
-
-    let radio_init = esp_radio::init().expect("Failed to initialize Wi-Fi/BLE controller");
-    let (mut _wifi_controller, _interfaces) =
-        esp_radio::wifi::new(&radio_init, peripherals.WIFI, Default::default())
-            .expect("Failed to initialize Wi-Fi controller");
 
     // --------- i2c
     let i2c = I2c::new(peripherals.I2C0, Config::default())
@@ -56,12 +45,9 @@ async fn main(spawner: Spawner) -> ! {
         0x40,      // Databyte
     );
 
-    let raw_disp = Builder::new(oled_async::displays::sh1106::Sh1106_128_64 {})
-        // .with_rotation(DisplayRotation::Rotate180)
-        .connect(di);
+    let raw_disp = Builder::new(oled_async::displays::sh1106::Sh1106_128_64 {}).connect(di);
     let display: OledDisplay = raw_disp.into();
 
-    spawner.spawn(display_task(display)).unwrap();
     // -------- i2s
     let dma_channel = peripherals.DMA_CH0;
     let (_, _, tx_buffer, tx_descriptors) = esp_hal::dma_buffers!(0, 4 * 4092);
@@ -83,73 +69,27 @@ async fn main(spawner: Spawner) -> ! {
         .with_dout(peripherals.GPIO10)
         .build(tx_descriptors);
 
+    // spawn tasks
     spawner
         .spawn(button_task(
             peripherals.GPIO4.into(),
-            "Encoder button",
+            "Encoder",
             &IS_PLAYING_SIGNAL,
         ))
         .unwrap();
-
     spawner
-        .spawn(button_task(
-            peripherals.GPIO1.into(),
-            "Prev button",
-            &PREVIOUS,
-        ))
+        .spawn(button_task(peripherals.GPIO1.into(), "Prev", &PREVIOUS))
         .unwrap();
-
     spawner
-        .spawn(button_task(peripherals.GPIO7.into(), "Next button", &NEXT))
+        .spawn(button_task(peripherals.GPIO7.into(), "Next", &NEXT))
         .unwrap();
-
     spawner
         .spawn(encoder_reader_task(
             peripherals.GPIO3.into(),
             peripherals.GPIO2.into(),
         ))
         .unwrap();
-
     spawner.spawn(volume_handler_task()).unwrap();
+    spawner.spawn(display_task(display)).unwrap();
     spawner.spawn(audio_task(i2s_tx, tx_buffer)).unwrap();
-
-    // Escrever continuamente
-    // let mut transfer = i2s_tx.write_dma_circular(tx_buffer).unwrap();
-    // // -------- i2s
-    // let mut audio_offset = 0;
-    // let gain = 0.5;
-    // loop {
-    //     let avail = transfer.available().unwrap();
-    //
-    //     // ✅ Só empurrar quando houver BASTANTE espaço (não apenas > 0)
-    //     if avail > 1024 {
-    //         // ✅ Limitar tamanho do chunk (não usar todo o 'avail')
-    //         let chunk_size = 512.min(avail).min(AUDIO_DATA.len() - audio_offset);
-    //
-    //         let audio_chunk = &AUDIO_DATA[audio_offset..audio_offset + chunk_size];
-    //         // ✅ Aplicar ganho aos samples
-    //         let mut amplified = [0u8; 512];
-    //         for (i, sample_bytes) in audio_chunk.chunks_exact(2).enumerate() {
-    //             // Converter bytes para i16
-    //             let sample = i16::from_le_bytes([sample_bytes[0], sample_bytes[1]]);
-    //
-    //             // Multiplicar por ganho
-    //             let amplified_sample = ((sample as f32) * gain) as i16;
-    //
-    //             // Converter de volta para bytes
-    //             amplified[i * 2..i * 2 + 2].copy_from_slice(&amplified_sample.to_le_bytes());
-    //         }
-    //
-    //         transfer.push(&amplified[..chunk_size]).unwrap();
-    //
-    //         audio_offset += chunk_size;
-    //         if audio_offset >= AUDIO_DATA.len() {
-    //             audio_offset = 0;
-    //         }
-    //     }
-    // }
-    loop {
-        rprintln!("Hello world!");
-        Timer::after(Duration::from_secs(5)).await;
-    }
 }

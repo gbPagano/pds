@@ -1,19 +1,16 @@
 use core::sync::atomic::Ordering;
 use display_interface_i2c::I2CInterface;
 use embassy_time::{Duration, Timer};
-use embedded_graphics::image::Image;
-use embedded_graphics::mono_font::ascii::FONT_7X13_BOLD;
 use embedded_graphics::{
-    mono_font::MonoTextStyle,
+    image::Image,
+    mono_font::{MonoTextStyle, ascii::FONT_7X13_BOLD},
     pixelcolor::BinaryColor,
     prelude::*,
     primitives::{PrimitiveStyleBuilder, Rectangle},
     text::Text,
 };
-use esp_hal::Async;
-use esp_hal::i2c::master::I2c;
-use oled_async::displays::sh1106;
-use oled_async::mode::GraphicsMode;
+use esp_hal::{Async, i2c::master::I2c};
+use oled_async::{displays::sh1106, mode::GraphicsMode};
 use tinybmp::Bmp;
 
 use crate::assets::{

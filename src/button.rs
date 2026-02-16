@@ -26,7 +26,7 @@ pub async fn button_task(
         Timer::after(Duration::from_millis(20)).await; // Debounce
 
         if button.is_low() {
-            log::debug!("{id} pressed!");
+            log::debug!("{id} button pressed!");
             signal.signal(true);
         }
     }

@@ -1,8 +1,7 @@
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
-use esp_hal::Blocking;
-use esp_hal::i2s::master::I2sTx;
+use esp_hal::{Blocking, i2s::master::I2sTx};
 
 use crate::button::ButtonSignal;
 use crate::encoder::{ENCODER_CHANNEL, EncoderDirection};
