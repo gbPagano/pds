@@ -83,11 +83,7 @@ bench = false
 test = false
 
 [[bin]]
-name = "audio"
+name = "pds"
 test = false
 bench = false
 
-[[bin]]
-name = "test"
-test = false
-bench = false

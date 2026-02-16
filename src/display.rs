@@ -19,7 +19,8 @@ use tinybmp::Bmp;
 use crate::assets::{
     NEXT_BYTES, PAUSE_BYTES, PLAY_BYTES, PREV_BYTES, SOUND_ICON_BYTES, SOUND_WAVE_BYTES,
 };
-use crate::audio::{CURRENT_PERCENTAGE, IS_PLAYING, VOLUME};
+use crate::audio::{CURRENT_MUSIC_INDEX, CURRENT_PERCENTAGE, IS_PLAYING, VOLUME};
+use crate::music::Musics;
 
 pub type OledDisplay = GraphicsMode<sh1106::Sh1106_128_64, I2CInterface<I2c<'static, Async>>>;
 
@@ -36,6 +37,7 @@ pub async fn display_task(mut display: OledDisplay) {
     let mut wave_iter = wave_gif.frames();
     let mut current_frame = wave_iter.next().unwrap();
     loop {
+        display.clear();
         if IS_PLAYING.load(Ordering::Relaxed) {
             match wave_iter.next() {
                 Some(frame) => {
@@ -48,7 +50,8 @@ pub async fn display_task(mut display: OledDisplay) {
             }
         }
 
-        Text::new("Tetris", Point::new(35, 15), style)
+        let curr_music = Musics::from_index(&CURRENT_MUSIC_INDEX.load(Ordering::Relaxed));
+        Text::new(curr_music.title(), curr_music.title_pos(), style)
             .draw(&mut display)
             .unwrap();
 
@@ -106,7 +109,6 @@ pub async fn display_task(mut display: OledDisplay) {
 
         if IS_PLAYING.load(Ordering::Relaxed) {
             let delay = (current_frame.delay_centis as u64) * 3;
-            log::debug!("delay gif: {delay}");
             Timer::after(Duration::from_millis(delay.max(10))).await;
         } else {
             Timer::after(Duration::from_millis(100)).await;

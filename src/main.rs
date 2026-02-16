@@ -92,15 +92,15 @@ async fn main(spawner: Spawner) -> ! {
         .unwrap();
 
     spawner
-        .spawn(button_task(peripherals.GPIO1.into(), "Next button", &NEXT))
-        .unwrap();
-
-    spawner
         .spawn(button_task(
-            peripherals.GPIO7.into(),
+            peripherals.GPIO1.into(),
             "Prev button",
             &PREVIOUS,
         ))
+        .unwrap();
+
+    spawner
+        .spawn(button_task(peripherals.GPIO7.into(), "Next button", &NEXT))
         .unwrap();
 
     spawner

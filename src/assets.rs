@@ -4,3 +4,5 @@ pub static PAUSE_BYTES: &[u8] = include_bytes!("../assets/pause.bmp");
 pub static PREV_BYTES: &[u8] = include_bytes!("../assets/prev.bmp");
 pub static NEXT_BYTES: &[u8] = include_bytes!("../assets/next.bmp");
 pub static SOUND_ICON_BYTES: &[u8] = include_bytes!("../assets/sound.bmp");
+pub static TETRIS_MUSIC: &[u8] = include_bytes!("../assets/tetris.raw");
+pub static LIKE_A_STONE_MUSIC: &[u8] = include_bytes!("../assets/like_a_stone.raw");

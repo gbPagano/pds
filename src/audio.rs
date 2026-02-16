@@ -6,6 +6,7 @@ use esp_hal::i2s::master::I2sTx;
 
 use crate::button::ButtonSignal;
 use crate::encoder::{ENCODER_CHANNEL, EncoderDirection};
+use crate::music::Musics;
 
 pub static VOLUME: AtomicU8 = AtomicU8::new(50); // initial volume to 50%
 pub static CURRENT_PERCENTAGE: AtomicU8 = AtomicU8::new(0);
@@ -13,8 +14,7 @@ pub static IS_PLAYING_SIGNAL: ButtonSignal = Signal::new();
 pub static IS_PLAYING: AtomicBool = AtomicBool::new(false);
 pub static NEXT: ButtonSignal = Signal::new();
 pub static PREVIOUS: ButtonSignal = Signal::new();
-
-const AUDIO_DATA: &[u8] = include_bytes!("../tetris.raw");
+pub static CURRENT_MUSIC_INDEX: AtomicU8 = AtomicU8::new(0);
 
 #[embassy_executor::task]
 pub async fn volume_handler_task() {
@@ -54,22 +54,58 @@ pub async fn audio_task(
     // Inicializa o transfer DMA circular
     let mut transfer = i2s_tx.write_dma_circular(tx_buffer).unwrap();
 
+    let mut current_music = Musics::from_index(&CURRENT_MUSIC_INDEX.load(Ordering::Relaxed));
+    let mut audio_data = current_music.bytes();
+    let mut total_len = audio_data.len();
+
     let mut audio_offset = 0;
     let mut is_playing = IS_PLAYING.load(Ordering::Relaxed);
-    let total_len = AUDIO_DATA.len();
 
     // Controle de tempo para o Log
     let mut last_log_time = Instant::now();
     loop {
-        // ====================================================================
-        // 1. VERIFICAÇÃO DE SINAIS (Controle)
-        // ====================================================================
-
         // --- Check: Play/Pause ---
         if IS_PLAYING_SIGNAL.try_take().is_some() {
             is_playing = !is_playing;
             IS_PLAYING.store(is_playing, Ordering::Relaxed);
             log::info!("Play/pause");
+        }
+
+        // --- Check: Next Music ---
+        if NEXT.try_take().is_some() {
+            current_music = current_music.next();
+            CURRENT_MUSIC_INDEX.store(current_music.to_index(), Ordering::Relaxed);
+            audio_data = current_music.bytes();
+            total_len = audio_data.len();
+            audio_offset = 0;
+            CURRENT_PERCENTAGE.store(0, Ordering::Relaxed);
+
+            // Inicia a reprodução automaticamente
+            is_playing = true;
+            IS_PLAYING.store(true, Ordering::Relaxed);
+
+            log::info!("Next music: {}", current_music.title());
+        }
+
+        // --- Check: Previous Music ---
+        if PREVIOUS.try_take().is_some() {
+            // Reset treshold 10%
+            if (audio_offset * 100) / total_len > 10 {
+                audio_offset = 0;
+                CURRENT_PERCENTAGE.store(0, Ordering::Relaxed);
+                log::info!("Restarting current music: {}", current_music.title());
+            } else {
+                current_music = current_music.prev();
+                CURRENT_MUSIC_INDEX.store(current_music.to_index(), Ordering::Relaxed);
+                audio_data = current_music.bytes();
+                total_len = audio_data.len();
+                audio_offset = 0;
+                CURRENT_PERCENTAGE.store(0, Ordering::Relaxed);
+                log::info!("Previous music: {}", current_music.title());
+            }
+            // Inicia a reprodução automaticamente
+            is_playing = true;
+            IS_PLAYING.store(true, Ordering::Relaxed);
         }
 
         // ====================================================================
@@ -89,9 +125,8 @@ pub async fn audio_task(
         }
 
         if avail > 1024 {
-            let chunk_size = 512.min(avail).min(AUDIO_DATA.len() - audio_offset);
-
-            let audio_chunk = &AUDIO_DATA[audio_offset..audio_offset + chunk_size];
+            let chunk_size = 512.min(avail).min(audio_data.len() - audio_offset);
+            let audio_chunk = &audio_data[audio_offset..audio_offset + chunk_size];
 
             // Buffer temporário para processar o ganho
             let mut amplified = [0u8; 512];
@@ -118,12 +153,12 @@ pub async fn audio_task(
             }
 
             audio_offset += chunk_size;
-            if audio_offset >= AUDIO_DATA.len() {
+            if audio_offset >= audio_data.len() {
                 audio_offset = 0;
                 is_playing = false;
                 IS_PLAYING.store(is_playing, Ordering::Relaxed);
                 CURRENT_PERCENTAGE.store(0, Ordering::Relaxed);
-                log::info!("Music ended!");
+                log::info!("Music '{}' ended!", current_music.title());
             }
         }
         Timer::after(Duration::from_millis(5)).await;
