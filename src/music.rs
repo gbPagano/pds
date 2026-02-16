@@ -1,19 +1,16 @@
-use core::sync::atomic::{AtomicU8, Ordering};
-use embassy_futures::select::{Either, select};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::Blocking;
-use esp_hal::dma::DmaTransferTxCircular;
-use esp_hal::gpio::{AnyPin, Input, InputConfig, Pull};
 use esp_hal::i2s::master::I2sTx;
 
 use crate::button::ButtonSignal;
 use crate::encoder::{ENCODER_CHANNEL, EncoderDirection};
 
 pub static VOLUME: AtomicU8 = AtomicU8::new(50); // initial volume to 50%
-pub static IS_PLAYING: ButtonSignal = Signal::new();
+pub static CURRENT_PERCENTAGE: AtomicU8 = AtomicU8::new(0);
+pub static IS_PLAYING_SIGNAL: ButtonSignal = Signal::new();
+pub static IS_PLAYING: AtomicBool = AtomicBool::new(false);
 pub static NEXT: ButtonSignal = Signal::new();
 pub static PREVIOUS: ButtonSignal = Signal::new();
 
@@ -58,7 +55,7 @@ pub async fn audio_task(
     let mut transfer = i2s_tx.write_dma_circular(tx_buffer).unwrap();
 
     let mut audio_offset = 0;
-    let mut is_paused = false; // Estado local de pausa
+    let mut is_playing = IS_PLAYING.load(Ordering::Relaxed);
     let total_len = AUDIO_DATA.len();
 
     // Controle de tempo para o Log
@@ -69,8 +66,9 @@ pub async fn audio_task(
         // ====================================================================
 
         // --- Check: Play/Pause ---
-        if IS_PLAYING.try_take().is_some() {
-            is_paused = !is_paused;
+        if IS_PLAYING_SIGNAL.try_take().is_some() {
+            is_playing = !is_playing;
+            IS_PLAYING.store(is_playing, Ordering::Relaxed);
             log::info!("Play/pause");
         }
 
@@ -80,7 +78,7 @@ pub async fn audio_task(
 
         let avail = transfer.available().unwrap();
 
-        if is_paused {
+        if !is_playing {
             let silence = [0u8; 512]; // Buffer temporário de silêncio
             let chunk = avail.min(512);
 
@@ -114,6 +112,7 @@ pub async fn audio_task(
 
             if last_log_time.elapsed() > Duration::from_secs(1) {
                 let percent = (audio_offset * 100) / total_len;
+                CURRENT_PERCENTAGE.store(percent as u8, Ordering::Relaxed);
                 log::info!("Playing: {percent}%");
                 last_log_time = Instant::now();
             }
@@ -121,7 +120,9 @@ pub async fn audio_task(
             audio_offset += chunk_size;
             if audio_offset >= AUDIO_DATA.len() {
                 audio_offset = 0;
-                is_paused = true;
+                is_playing = false;
+                IS_PLAYING.store(is_playing, Ordering::Relaxed);
+                CURRENT_PERCENTAGE.store(0, Ordering::Relaxed);
                 log::info!("Music ended!");
             }
         }

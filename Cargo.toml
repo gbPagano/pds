@@ -55,6 +55,13 @@ libm = "0.2.16"
 embassy-sync = "0.7.2"
 log = "0.4.29"
 embassy-futures = "0.1.2"
+embedded-graphics = "0.8.1"
+embedded-hal-async = "1.0.0"
+oled_async = { git = "https://github.com/cschuhen/oled_drivers", rev = "0aa4b3d", features = ["i2c"] }
+display-interface = "0.5"
+display-interface-i2c = "0.5"
+tinybmp = "0.7.0"
+tinygif = "0.0.4"
 
 
 [profile.dev]

@@ -1,21 +1,24 @@
 #![no_std]
 #![no_main]
 
+use display_interface_i2c::I2CInterface;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
+use esp_hal::i2c::master::{Config, I2c};
 use esp_hal::{clock::CpuClock, i2s::master as i2s, time::Rate, timer::timg::TimerGroup};
+use oled_async::builder::Builder;
 use rtt_target::rprintln;
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
-    loop {
-        rprintln!("PANIC!");
-    }
+    rprintln!("PANIC!!");
+    loop {}
 }
 
 use pds::button::button_task;
+use pds::display::{OledDisplay, display_task};
 use pds::encoder::encoder_reader_task;
-use pds::music::{IS_PLAYING, NEXT, PREVIOUS, audio_task, volume_handler_task};
+use pds::music::{IS_PLAYING_SIGNAL, NEXT, PREVIOUS, audio_task, volume_handler_task};
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -39,9 +42,26 @@ async fn main(spawner: Spawner) -> ! {
         esp_radio::wifi::new(&radio_init, peripherals.WIFI, Default::default())
             .expect("Failed to initialize Wi-Fi controller");
 
-    // TODO: Spawn some tasks
-    let _ = spawner;
+    // --------- i2c
+    let i2c = I2c::new(peripherals.I2C0, Config::default())
+        .unwrap()
+        .with_sda(peripherals.GPIO5)
+        .with_scl(peripherals.GPIO6);
 
+    let i2c_async = i2c.into_async();
+
+    let di = I2CInterface::new(
+        i2c_async, // I2C
+        0x3C,      // I2C Address
+        0x40,      // Databyte
+    );
+
+    let raw_disp = Builder::new(oled_async::displays::sh1106::Sh1106_128_64 {})
+        // .with_rotation(DisplayRotation::Rotate180)
+        .connect(di);
+    let display: OledDisplay = raw_disp.into();
+
+    spawner.spawn(display_task(display)).unwrap();
     // -------- i2s
     let dma_channel = peripherals.DMA_CH0;
     let (_, _, tx_buffer, tx_descriptors) = esp_hal::dma_buffers!(0, 4 * 4092);
@@ -67,7 +87,19 @@ async fn main(spawner: Spawner) -> ! {
         .spawn(button_task(
             peripherals.GPIO4.into(),
             "Encoder button",
-            &IS_PLAYING,
+            &IS_PLAYING_SIGNAL,
+        ))
+        .unwrap();
+
+    spawner
+        .spawn(button_task(peripherals.GPIO1.into(), "Next button", &NEXT))
+        .unwrap();
+
+    spawner
+        .spawn(button_task(
+            peripherals.GPIO7.into(),
+            "Prev button",
+            &PREVIOUS,
         ))
         .unwrap();
 
