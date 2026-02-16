@@ -19,22 +19,25 @@ use crate::assets::{
 use crate::audio::{CURRENT_MUSIC_INDEX, CURRENT_PERCENTAGE, IS_PLAYING, VOLUME};
 use crate::music::Musics;
 
+/// Type alias for the SH1106 OLED display using I2C and Async mode.
 pub type OledDisplay = GraphicsMode<sh1106::Sh1106_128_64, I2CInterface<I2c<'static, Async>>>;
 
+/// Main task for UI rendering.
 #[embassy_executor::task]
 pub async fn display_task(mut display: OledDisplay) {
     display.init().await.unwrap();
-
-    let wave_gif = tinygif::Gif::<BinaryColor>::from_slice(SOUND_WAVE_BYTES).unwrap();
-
-    let style = MonoTextStyle::new(&FONT_7X13_BOLD, BinaryColor::On);
-    display.clear();
     display.flush().await.unwrap();
 
+    let style = MonoTextStyle::new(&FONT_7X13_BOLD, BinaryColor::On);
+    // Load animated sound wave GIF from static assets
+    let wave_gif = tinygif::Gif::<BinaryColor>::from_slice(SOUND_WAVE_BYTES).unwrap();
     let mut wave_iter = wave_gif.frames();
     let mut current_frame = wave_iter.next().unwrap();
     loop {
         display.clear();
+
+        // --- 1. Animation Logic ---
+        // Increment GIF frame only if audio is playing
         if IS_PLAYING.load(Ordering::Relaxed) {
             match wave_iter.next() {
                 Some(frame) => {
@@ -47,37 +50,46 @@ pub async fn display_task(mut display: OledDisplay) {
             }
         }
 
+        // --- 2. Track Title ---
         let curr_music = Musics::from_index(&CURRENT_MUSIC_INDEX.load(Ordering::Relaxed));
         Text::new(curr_music.title(), curr_music.title_pos(), style)
             .draw(&mut display)
             .unwrap();
 
-        // Current gif frame
+        // --- 3. Sound Visualizer ---
+        // Renders the current git frame for a moving effect
         let (x, y) = (23, 22);
-        current_frame
-            .draw(&mut display.translated(Point::new(x + 42, y)))
-            .unwrap();
-        current_frame
-            .draw(&mut display.translated(Point::new(x + 21, y)))
-            .unwrap();
-        current_frame
-            .draw(&mut display.translated(Point::new(x, y)))
-            .unwrap();
+        for offset in [42, 21, 0] {
+            current_frame
+                .draw(&mut display.translated(Point::new(x + offset, y)))
+                .unwrap();
+        }
 
-        // next and prev icons
-        let bmp: Bmp<BinaryColor> = Bmp::from_slice(NEXT_BYTES).unwrap();
-        let image = Image::new(&bmp, Point::new(x + 68, y + 4));
-        image.draw(&mut display).unwrap();
-        let bmp: Bmp<BinaryColor> = Bmp::from_slice(PREV_BYTES).unwrap();
-        let image = Image::new(&bmp, Point::new(x - 18, y + 4));
-        image.draw(&mut display).unwrap();
+        // --- 4. Control Icons (BMP) ---
+        // Next & Previous
+        Image::new(
+            &Bmp::from_slice(NEXT_BYTES).unwrap(),
+            Point::new(x + 68, y + 4),
+        )
+        .draw(&mut display)
+        .unwrap();
+        Image::new(
+            &Bmp::from_slice(PREV_BYTES).unwrap(),
+            Point::new(x - 18, y + 4),
+        )
+        .draw(&mut display)
+        .unwrap();
 
-        // play pause icon
-        let bmp: Bmp<BinaryColor> = Bmp::from_slice(get_play_pause_icon()).unwrap();
-        let image = Image::new(&bmp, Point::new(6, 52));
-        image.draw(&mut display).unwrap();
+        // Play/Pause toggle icon
+        Image::new(
+            &Bmp::from_slice(get_play_pause_icon()).unwrap(),
+            Point::new(6, 52),
+        )
+        .draw(&mut display)
+        .unwrap();
 
-        // progress bar
+        // --- 5. Gauges ---
+        // Playback progress (Horizontal)
         draw_progress_bar(
             &mut display,
             CURRENT_PERCENTAGE.load(Ordering::Relaxed),
@@ -87,7 +99,7 @@ pub async fn display_task(mut display: OledDisplay) {
         )
         .unwrap();
 
-        // volume bar
+        // Volume level (Vertical)
         draw_progress_bar(
             &mut display,
             VOLUME.load(Ordering::Relaxed),
@@ -97,13 +109,18 @@ pub async fn display_task(mut display: OledDisplay) {
         )
         .unwrap();
 
-        // sound icon
-        let bmp: Bmp<BinaryColor> = Bmp::from_slice(SOUND_ICON_BYTES).unwrap();
-        let image = Image::new(&bmp, Point::new(115, 52));
-        image.draw(&mut display).unwrap();
+        // Volume icon
+        Image::new(
+            &Bmp::from_slice(SOUND_ICON_BYTES).unwrap(),
+            Point::new(115, 52),
+        )
+        .draw(&mut display)
+        .unwrap();
 
+        // Send buffer to the physical display
         display.flush().await.unwrap();
 
+        // Frame rate control: Fast refresh for animation, slow refresh when idle
         if IS_PLAYING.load(Ordering::Relaxed) {
             let delay = (current_frame.delay_centis as u64) * 3;
             Timer::after(Duration::from_millis(delay.max(10))).await;
@@ -127,7 +144,8 @@ pub enum Orientation {
     Vertical,
 }
 
-/// Generic progress bar drawing function
+/// Draws a stylized progress bar.
+/// Supports both Horizontal (fill from left) and Vertical (fill from bottom) orientations.
 fn draw_progress_bar<D>(
     target: &mut D,
     progress: u8,
@@ -153,22 +171,24 @@ where
 
     let safe_progress = progress.min(100);
     let margin = 2;
-
     let (fill_size, fill_position) = match orientation {
         Orientation::Horizontal => {
-            let max_width = size.width - (margin * 2);
-            let current_width = (max_width * safe_progress as u32) / 100;
-            let fill_size = Size::new(current_width, size.height - (margin * 2));
-            let fill_position = position + Point::new(margin as i32, margin as i32);
-            (fill_size, fill_position)
+            let max_w = size.width - (margin * 2);
+            let current_w = (max_w * safe_progress as u32) / 100;
+            (
+                Size::new(current_w, size.height - (margin * 2)),
+                position + Point::new(margin as i32, margin as i32),
+            )
         }
         Orientation::Vertical => {
-            let max_height = size.height - (margin * 2);
-            let current_height = (max_height * safe_progress as u32) / 100;
-            let fill_size = Size::new(size.width - (margin * 2), current_height);
-            let y_offset = (size.height - margin) - current_height;
-            let fill_position = position + Point::new(margin as i32, y_offset as i32);
-            (fill_size, fill_position)
+            let max_h = size.height - (margin * 2);
+            let current_h = (max_h * safe_progress as u32) / 100;
+            // Fill from bottom to top
+            let y_offset = (size.height - margin) - current_h;
+            (
+                Size::new(size.width - (margin * 2), current_h),
+                position + Point::new(margin as i32, y_offset as i32),
+            )
         }
     };
 

@@ -7,14 +7,28 @@ use crate::button::ButtonSignal;
 use crate::encoder::{ENCODER_CHANNEL, EncoderDirection};
 use crate::music::Musics;
 
-pub static VOLUME: AtomicU8 = AtomicU8::new(50); // initial volume to 50%
+/// Shared system volume (0-100%).
+pub static VOLUME: AtomicU8 = AtomicU8::new(50);
+/// Current playback progress percentage.
 pub static CURRENT_PERCENTAGE: AtomicU8 = AtomicU8::new(0);
+/// Signal to toggle Play/Pause state.
 pub static IS_PLAYING_SIGNAL: ButtonSignal = Signal::new();
+/// Atomic flag for current playback status.
 pub static IS_PLAYING: AtomicBool = AtomicBool::new(false);
+/// Signal to trigger next track.
 pub static NEXT: ButtonSignal = Signal::new();
+/// Signal to trigger previous track or restart current.
 pub static PREVIOUS: ButtonSignal = Signal::new();
+/// Index of the currently loaded track.
 pub static CURRENT_MUSIC_INDEX: AtomicU8 = AtomicU8::new(0);
 
+/// DMA buffer size configuration.
+/// 4092 bytes is the hardware limit for a single ESP32 DMA descriptor.
+/// We use a multiplier of 4 to create a circular buffer of ~16KB.
+pub const DMA_BUFFER_SIZE: usize = 4 * 4092;
+
+/// Handles volume adjustments based on rotary encoder input.
+/// Listens to ENCODER_CHANNEL and updates the global VOLUME atomic.
 #[embassy_executor::task]
 pub async fn volume_handler_task() {
     loop {
@@ -22,10 +36,9 @@ pub async fn volume_handler_task() {
 
         match direction {
             EncoderDirection::Clockwise => {
-                // Increase max to 100
                 VOLUME
                     .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-                        if v < 100 { Some(v + 5) } else { Some(100) }
+                        Some((v + 5).min(100)) // Cap at 100%
                     })
                     .ok();
             }
@@ -34,23 +47,24 @@ pub async fn volume_handler_task() {
                 // decrease min to 0
                 VOLUME
                     .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-                        if v > 0 { Some(v - 5) } else { Some(0) }
+                        Some(v.saturating_sub(5)) // Floor at 0%
                     })
                     .ok();
             }
         }
 
-        let volume_level = VOLUME.load(Ordering::Relaxed);
-        log::info!("Volume changed: {volume_level}");
+        log::info!("Volume changed: {}", VOLUME.load(Ordering::Relaxed));
     }
 }
 
+/// Core audio engine task.
+/// Manages I2S DMA transfers, track switching, and real-time gain scaling.
 #[embassy_executor::task]
 pub async fn audio_task(
     mut i2s_tx: I2sTx<'static, Blocking>,
-    tx_buffer: &'static mut [u8; 4 * 4092],
+    tx_buffer: &'static mut [u8; DMA_BUFFER_SIZE],
 ) {
-    // Inicializa o transfer DMA circular
+    // Initialize circular DMA transfer for continuous playback
     let mut transfer = i2s_tx.write_dma_circular(tx_buffer).unwrap();
 
     let mut current_music = Musics::from_index(&CURRENT_MUSIC_INDEX.load(Ordering::Relaxed));
@@ -59,66 +73,57 @@ pub async fn audio_task(
 
     let mut audio_offset = 0;
     let mut is_playing = IS_PLAYING.load(Ordering::Relaxed);
-
-    // Controle de tempo para o Log
     let mut last_log_time = Instant::now();
+
     loop {
-        // --- Check: Play/Pause ---
+        // 1. Handle Control Signals (Play/Pause/Next/Prev)
         if IS_PLAYING_SIGNAL.try_take().is_some() {
             is_playing = !is_playing;
-            IS_PLAYING.store(is_playing, Ordering::Relaxed);
             log::info!("Play/pause");
         }
-
-        // --- Check: Next Music ---
         if NEXT.try_take().is_some() {
-            current_music = current_music.next();
-            CURRENT_MUSIC_INDEX.store(current_music.to_index(), Ordering::Relaxed);
-            audio_data = current_music.bytes();
-            total_len = audio_data.len();
-            audio_offset = 0;
-            CURRENT_PERCENTAGE.store(0, Ordering::Relaxed);
-
-            // Inicia a reprodução automaticamente
+            let new_music = current_music.next();
+            load_track(
+                &mut current_music,
+                &mut audio_data,
+                &mut total_len,
+                &mut audio_offset,
+                new_music,
+            );
             is_playing = true;
-            IS_PLAYING.store(true, Ordering::Relaxed);
-
             log::info!("Next music: {}", current_music.title());
         }
 
-        // --- Check: Previous Music ---
         if PREVIOUS.try_take().is_some() {
-            // Reset treshold 10%
+            // Restart if >10% played, otherwise go to previous track
             if (audio_offset * 100) / total_len > 10 {
                 audio_offset = 0;
                 CURRENT_PERCENTAGE.store(0, Ordering::Relaxed);
                 log::info!("Restarting current music: {}", current_music.title());
             } else {
-                current_music = current_music.prev();
-                CURRENT_MUSIC_INDEX.store(current_music.to_index(), Ordering::Relaxed);
-                audio_data = current_music.bytes();
-                total_len = audio_data.len();
-                audio_offset = 0;
-                CURRENT_PERCENTAGE.store(0, Ordering::Relaxed);
+                let new_music = current_music.prev();
+                load_track(
+                    &mut current_music,
+                    &mut audio_data,
+                    &mut total_len,
+                    &mut audio_offset,
+                    new_music,
+                );
                 log::info!("Previous music: {}", current_music.title());
             }
-            // Inicia a reprodução automaticamente
             is_playing = true;
-            IS_PLAYING.store(true, Ordering::Relaxed);
         }
 
-        // ====================================================================
-        // 2. PROCESSAMENTO DE ÁUDIO
-        // ====================================================================
+        IS_PLAYING.store(is_playing, Ordering::Relaxed);
 
+        // 2. Audio Processing & DMA Feed
         let avail = transfer.available().unwrap();
 
         if !is_playing {
-            let silence = [0u8; 512]; // Buffer temporário de silêncio
+            // Feed silence to prevent audio artifacts while paused
+            let silence = [0u8; 512];
             let chunk = avail.min(512);
-
             transfer.push(&silence[..chunk]).unwrap();
-
             Timer::after(Duration::from_millis(10)).await;
             continue;
         }
@@ -127,23 +132,21 @@ pub async fn audio_task(
             let chunk_size = 512.min(avail).min(audio_data.len() - audio_offset);
             let audio_chunk = &audio_data[audio_offset..audio_offset + chunk_size];
 
-            // Buffer temporário para processar o ganho
             let mut amplified = [0u8; 512];
             let volume_level = VOLUME.load(Ordering::Relaxed);
             let gain = (volume_level as f32) / 100.0;
 
+            // Apply software volume scaling (Gain) to 16-bit PCM samples
             for (i, sample_bytes) in audio_chunk.chunks_exact(2).enumerate() {
                 let sample = i16::from_le_bytes([sample_bytes[0], sample_bytes[1]]);
-
-                // Aplica o ganho dinâmico lido do encoder
                 let amplified_sample = ((sample as f32) * gain) as i16;
-
                 amplified[i * 2..i * 2 + 2].copy_from_slice(&amplified_sample.to_le_bytes());
             }
-
-            // Envia para o DMA
+            // Send to DMA
             transfer.push(&amplified[..chunk_size]).unwrap();
+            audio_offset += chunk_size;
 
+            // Track Progress Logging
             if last_log_time.elapsed() > Duration::from_secs(1) {
                 let percent = (audio_offset * 100) / total_len;
                 CURRENT_PERCENTAGE.store(percent as u8, Ordering::Relaxed);
@@ -151,7 +154,7 @@ pub async fn audio_task(
                 last_log_time = Instant::now();
             }
 
-            audio_offset += chunk_size;
+            // Stop at EOF
             if audio_offset >= audio_data.len() {
                 audio_offset = 0;
                 is_playing = false;
@@ -162,4 +165,20 @@ pub async fn audio_task(
         }
         Timer::after(Duration::from_millis(5)).await;
     }
+}
+
+/// Helper to update track state (Internal logic)
+fn load_track(
+    music: &mut Musics,
+    data: &mut &[u8],
+    total: &mut usize,
+    offset: &mut usize,
+    new_music: Musics,
+) {
+    *music = new_music;
+    CURRENT_MUSIC_INDEX.store(music.to_index(), Ordering::Relaxed);
+    *data = music.bytes();
+    *total = data.len();
+    *offset = 0;
+    CURRENT_PERCENTAGE.store(0, Ordering::Relaxed);
 }
