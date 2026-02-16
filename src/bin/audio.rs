@@ -15,10 +15,10 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
+use pds::audio::{IS_PLAYING_SIGNAL, NEXT, PREVIOUS, audio_task, volume_handler_task};
 use pds::button::button_task;
 use pds::display::{OledDisplay, display_task};
 use pds::encoder::encoder_reader_task;
-use pds::music::{IS_PLAYING_SIGNAL, NEXT, PREVIOUS, audio_task, volume_handler_task};
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 esp_bootloader_esp_idf::esp_app_desc!();

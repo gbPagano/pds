@@ -19,7 +19,7 @@ use tinybmp::Bmp;
 use crate::assets::{
     NEXT_BYTES, PAUSE_BYTES, PLAY_BYTES, PREV_BYTES, SOUND_ICON_BYTES, SOUND_WAVE_BYTES,
 };
-use crate::music::{CURRENT_PERCENTAGE, IS_PLAYING, VOLUME};
+use crate::audio::{CURRENT_PERCENTAGE, IS_PLAYING, VOLUME};
 
 pub type OledDisplay = GraphicsMode<sh1106::Sh1106_128_64, I2CInterface<I2c<'static, Async>>>;
 
