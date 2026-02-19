@@ -6,3 +6,5 @@ pub static NEXT_BYTES: &[u8] = include_bytes!("../assets/next.bmp");
 pub static SOUND_ICON_BYTES: &[u8] = include_bytes!("../assets/sound.bmp");
 pub static TETRIS_MUSIC: &[u8] = include_bytes!("../assets/tetris.raw");
 pub static LIKE_A_STONE_MUSIC: &[u8] = include_bytes!("../assets/like_a_stone.raw");
+pub static MARIO_WORLD: &[u8] = include_bytes!("../assets/mario-world.raw");
+pub static TOP_GEAR: &[u8] = include_bytes!("../assets/top-gear.raw");

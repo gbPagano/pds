@@ -1,17 +1,24 @@
 use embedded_graphics::prelude::Point;
 
-use crate::assets::{LIKE_A_STONE_MUSIC, TETRIS_MUSIC};
+use crate::assets;
 
 /// Enum representing available tracks in the system.
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Musics {
     LikeStone,
     Tetris,
+    MarioWorld,
+    TopGear,
 }
 
 impl Musics {
     /// Internal registry of all tracks to facilitate indexing and navigation.
-    const ALL: [Musics; 2] = [Musics::Tetris, Musics::LikeStone];
+    const ALL: [Musics; 4] = [
+        Musics::Tetris,
+        Musics::LikeStone,
+        Musics::MarioWorld,
+        Musics::TopGear,
+    ];
 
     /// Returns the next track in the list, wrapping back to the start if at the end.
     pub fn next(&self) -> Self {
@@ -28,8 +35,10 @@ impl Musics {
     /// Returns a static reference to the raw audio bytes stored in Flash.
     pub fn bytes(&self) -> &'static [u8] {
         match self {
-            Musics::LikeStone => LIKE_A_STONE_MUSIC,
-            Musics::Tetris => TETRIS_MUSIC,
+            Musics::LikeStone => assets::LIKE_A_STONE_MUSIC,
+            Musics::Tetris => assets::TETRIS_MUSIC,
+            Musics::MarioWorld => assets::MARIO_WORLD,
+            Musics::TopGear => assets::TOP_GEAR,
         }
     }
 
@@ -38,6 +47,8 @@ impl Musics {
         match self {
             Musics::LikeStone => "Like a Stone",
             Musics::Tetris => "Tetris",
+            Musics::MarioWorld => "Mario World",
+            Musics::TopGear => "Top Gear",
         }
     }
 
@@ -47,6 +58,8 @@ impl Musics {
         match self {
             Musics::LikeStone => Point::new(17, 15),
             Musics::Tetris => Point::new(35, 15),
+            Musics::MarioWorld => Point::new(19, 15),
+            Musics::TopGear => Point::new(28, 15),
         }
     }
 
@@ -55,6 +68,8 @@ impl Musics {
         match idx {
             0 => Musics::Tetris,
             1 => Musics::LikeStone,
+            2 => Musics::MarioWorld,
+            3 => Musics::TopGear,
             _ => Musics::Tetris, // Default fallback
         }
     }
@@ -64,6 +79,8 @@ impl Musics {
         match self {
             Musics::Tetris => 0,
             Musics::LikeStone => 1,
+            Musics::MarioWorld => 2,
+            Musics::TopGear => 3,
         }
     }
 }
